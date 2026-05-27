@@ -2,7 +2,7 @@
 
 Since you want MySQL as a Docker container for your Ledger service, use this exact command.
 
-Create MySQL container
+Create MySQL container:
 docker run -d \
 --name ledger-mysql \
 -p 3306:3306 \
