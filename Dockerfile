@@ -5,7 +5,7 @@ FROM eclipse-temurin:21-jre
 WORKDIR /app
 
 # Copy generated jar
-COPY target/ledger-service-1.0.jar app.jar
+COPY target/ledger-service-1.0.0.jar app.jar
 
 # Expose application port
 EXPOSE 8081
