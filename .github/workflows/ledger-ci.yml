@@ -1,6 +1,8 @@
-name: Ledger Service CI/CD
+```yaml
+name: Ledger Enterprise DevSecOps Pipeline
 
 on:
+
   push:
     branches:
       - main
@@ -11,66 +13,225 @@ on:
       - main
 
 env:
-  IMAGE_NAME: ledger-service
+
+  AWS_REGION: ap-southeast-2
+
+  ECR_REPOSITORY: ledger-service
+
+  ECR_REGISTRY: 339140804096.dkr.ecr.ap-southeast-2.amazonaws.com
 
 jobs:
 
-  build:
+  build-test-security:
 
     runs-on: ubuntu-latest
 
     steps:
 
-    - name: Checkout source code
-      uses: actions/checkout@v4
+      # Checkout Source
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
 
-    - name: Setup Java 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
-        cache: maven
+      # Setup Java
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
 
-    - name: Build application
-      run: mvn clean package -DskipTests
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
 
-    - name: Upload jar artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ledger-jar
-        path: target/*.jar
+      # Maven Build + Unit Tests + JaCoCo
+      - name: Maven Build
+        run: mvn clean verify
 
-  docker:
+      # Upload JAR Artifact
+      - name: Upload JAR Artifact
+        uses: actions/upload-artifact@v4
 
-    needs: build
+        with:
+          name: ledger-jar
+          path: target/*.jar
+
+      # Upload JaCoCo Coverage Report
+      - name: Upload JaCoCo Report
+        uses: actions/upload-artifact@v4
+
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+
+      # SonarCloud Scan
+      - name: SonarCloud Scan
+
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+        run: |
+          mvn sonar:sonar \
+          -Dsonar.projectKey=Jagadeesh-Tadepalli-M_MyProject-Ledger-service \
+          -Dsonar.organization=jagadeesh-tadepalli-m \
+          -Dsonar.host.url=https://sonarcloud.io \
+          -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+
+      # SonarCloud Quality Gate
+      - name: SonarCloud Quality Gate
+        uses: sonarsource/sonarqube-quality-gate-action@master
+
+        timeout-minutes: 5
+
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      # OWASP Dependency Check
+      - name: OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+
+        with:
+          project: 'ledger-service'
+          path: '.'
+          format: 'HTML'
+
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+
+      # Upload OWASP Report
+      - name: Upload OWASP Report
+        uses: actions/upload-artifact@v4
+
+        with:
+          name: dependency-check-report
+          path: reports/
+
+      # Trivy Filesystem Scan
+      - name: Trivy Filesystem Scan
+        uses: aquasecurity/trivy-action@master
+
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+
+  docker-build-scan-push:
+
+    needs: build-test-security
 
     runs-on: ubuntu-latest
 
     steps:
 
-    - name: Checkout source
-      uses: actions/checkout@v4
+      # Checkout Source
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
 
-    - name: Download JAR
-      uses: actions/download-artifact@v4
-      with:
-        name: ledger-jar
-        path: target/
+      # Configure AWS Credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
 
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Build Docker image
-      run: |
-        docker build \
-        -t ${{ secrets.DOCKER_USERNAME }}/ledger-service:${{ github.sha }} \
-        -t ${{ secrets.DOCKER_USERNAME }}/ledger-service:latest .
+      # Login to AWS ECR
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Push Docker image
-      run: |
-        docker push ${{ secrets.DOCKER_USERNAME }}/ledger-service:${{ github.sha }}
+      # Download JAR Artifact
+      - name: Download JAR Artifact
+        uses: actions/download-artifact@v4
 
-        docker push ${{ secrets.DOCKER_USERNAME }}/ledger-service:latest
+        with:
+          name: ledger-jar
+          path: target/
+
+      # Build Docker Image
+      - name: Build Docker Image
+
+        run: |
+          docker build -t ledger-service:latest .
+
+      # Clair Container Scan
+      - name: Clair Container Scan
+        uses: quay/clair-action@v0.3.0
+
+        with:
+          image-ref: ledger-service:latest
+
+      # Trivy Docker Image Scan
+      - name: Trivy Docker Image Scan
+        uses: aquasecurity/trivy-action@master
+
+        with:
+          image-ref: 'ledger-service:latest'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+
+      # Tag Docker Image
+      - name: Tag Docker Image
+
+        run: |
+          docker tag ledger-service:latest \
+          339140804096.dkr.ecr.ap-southeast-2.amazonaws.com/ledger-service:${{ github.sha }}
+
+          docker tag ledger-service:latest \
+          339140804096.dkr.ecr.ap-southeast-2.amazonaws.com/ledger-service:latest
+
+      # Push Docker Image to AWS ECR
+      - name: Push Docker Image
+
+        run: |
+          docker push \
+          339140804096.dkr.ecr.ap-southeast-2.amazonaws.com/ledger-service:${{ github.sha }}
+
+          docker push \
+          339140804096.dkr.ecr.ap-southeast-2.amazonaws.com/ledger-service:latest
+
+  zap-dast-security:
+
+    needs: docker-build-scan-push
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # Checkout Source
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      # Build Docker Image
+      - name: Build Docker Image
+
+        run: |
+          docker build -t ledger-service:latest .
+
+      # Start Application
+      - name: Start Ledger Service
+
+        run: |
+          docker run -d \
+          --name ledger-service \
+          -p 8081:8081 \
+          ledger-service:latest
+
+      # Wait for Application Startup
+      - name: Wait for Application Startup
+        run: sleep 40
+
+      # OWASP ZAP DAST Scan
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+
+        with:
+          target: 'http://localhost:8081'
+
+      # Upload ZAP Report
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+
+        with:
+          name: zap-report
+          path: report_html.html
+```
+
