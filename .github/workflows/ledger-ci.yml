@@ -11,6 +11,7 @@ on:
       - main
 
 env:
+  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
   AWS_REGION: ap-southeast-2
   ECR_REPOSITORY: ledger-service
   ECR_REGISTRY: 339140804096.dkr.ecr.ap-southeast-2.amazonaws.com
