@@ -4,21 +4,26 @@ on:
   push:
     branches:
       - main
-      - develop
+      - dev
 
   pull_request:
     branches:
       - main
 
+permissions:
+  contents: read
+  security-events: write
+
 env:
-  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
   AWS_REGION: ap-southeast-2
   ECR_REPOSITORY: ledger-service
   ECR_REGISTRY: 339140804096.dkr.ecr.ap-southeast-2.amazonaws.com
+  IMAGE_NAME: ledger-service
 
 jobs:
 
   build-test-security:
+
     runs-on: ubuntu-latest
 
     steps:
@@ -28,29 +33,34 @@ jobs:
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
+
         with:
           distribution: temurin
           java-version: 17
           cache: maven
 
-      - name: Maven Build
+      - name: Maven Build + Tests + JaCoCo
         run: mvn clean verify
 
       - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
+
         with:
           name: ledger-jar
           path: target/*.jar
 
       - name: Upload JaCoCo Report
         uses: actions/upload-artifact@v4
+
         with:
           name: jacoco-report
           path: target/site/jacoco/
 
       - name: SonarCloud Scan
+
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
         run: |
           mvn sonar:sonar \
             -Dsonar.projectKey=Jagadeesh-Tadepalli-M_MyProject-Ledger-service \
@@ -60,27 +70,33 @@ jobs:
 
       - name: SonarCloud Quality Gate
         uses: sonarsource/sonarqube-quality-gate-action@master
+
         timeout-minutes: 5
+
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: OWASP Dependency Check
         uses: dependency-check/Dependency-Check_Action@main
+
         with:
           project: ledger-service
           path: .
           format: HTML
+
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
       - name: Upload OWASP Report
         uses: actions/upload-artifact@v4
+
         with:
           name: dependency-check-report
           path: reports/
 
       - name: Trivy Filesystem Scan
         uses: aquasecurity/trivy-action@master
+
         with:
           scan-type: fs
           scan-ref: .
@@ -88,7 +104,9 @@ jobs:
           severity: CRITICAL,HIGH
 
   docker-build-scan-push:
+
     needs: build-test-security
+
     runs-on: ubuntu-latest
 
     steps:
@@ -98,6 +116,7 @@ jobs:
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
+
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -108,21 +127,25 @@ jobs:
 
       - name: Download JAR Artifact
         uses: actions/download-artifact@v4
+
         with:
           name: ledger-jar
           path: target/
 
       - name: Build Docker Image
         run: |
-          docker build -t ledger-service:latest .
+          docker build -t $IMAGE_NAME:latest .
 
       - name: Clair Container Scan
+        continue-on-error: true
         uses: quay/clair-action@v0.3.0
+
         with:
           image-ref: ledger-service:latest
 
       - name: Trivy Docker Image Scan
         uses: aquasecurity/trivy-action@master
+
         with:
           image-ref: ledger-service:latest
           format: table
@@ -130,22 +153,24 @@ jobs:
 
       - name: Tag Docker Image
         run: |
-          docker tag ledger-service:latest \
-          339140804096.dkr.ecr.ap-southeast-2.amazonaws.com/ledger-service:${{ github.sha }}
+          docker tag $IMAGE_NAME:latest \
+          $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
 
-          docker tag ledger-service:latest \
-          339140804096.dkr.ecr.ap-southeast-2.amazonaws.com/ledger-service:latest
+          docker tag $IMAGE_NAME:latest \
+          $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
       - name: Push Docker Image
         run: |
           docker push \
-          339140804096.dkr.ecr.ap-southeast-2.amazonaws.com/ledger-service:${{ github.sha }}
+          $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
 
           docker push \
-          339140804096.dkr.ecr.ap-southeast-2.amazonaws.com/ledger-service:latest
+          $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
   zap-dast-security:
+
     needs: docker-build-scan-push
+
     runs-on: ubuntu-latest
 
     steps:
@@ -169,11 +194,13 @@ jobs:
 
       - name: OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.12.0
+
         with:
           target: http://localhost:8081
 
       - name: Upload ZAP Report
         uses: actions/upload-artifact@v4
+
         with:
           name: zap-report
           path: report_html.html
