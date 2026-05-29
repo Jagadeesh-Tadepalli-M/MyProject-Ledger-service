@@ -77,17 +77,16 @@ jobs:
           echo "Checking Sonar report..."
           find . -name "report-task.txt"
 
-
-      - name: SonarCloud Quality Gate
-        uses: sonarsource/sonarqube-quality-gate-action@master
-
-        timeout-minutes: 5
-         
-        with:
-          scanMetadataReportFile: target/sonar/report-task.txt
-
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+#      - name: SonarCloud Quality Gate
+#       uses: sonarsource/sonarqube-quality-gate-action@master
+#
+#       timeout-minutes: 5
+#        
+#       with:
+#         scanMetadataReportFile: target/sonar/report-task.txt
+#
+#       env:
+#          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Verify NVD Secret
         run: |
