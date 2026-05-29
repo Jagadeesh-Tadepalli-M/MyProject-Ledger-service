@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - dev
 
   pull_request:
     branches:
@@ -28,8 +27,9 @@ jobs:
 
     steps:
 
-      - name: Checkout Source Code
+      - name: Checkout Code
         uses: actions/checkout@v4
+
         with:
           fetch-depth: 0
 
@@ -41,23 +41,42 @@ jobs:
           java-version: 17
           cache: maven
 
-      - name: Maven Build + Tests + JaCoCo
+      #################################################
+      # BUILD + UNIT TEST
+      #################################################
+
+      - name: Build and Unit Test
         run: mvn clean verify
 
-      - name: Upload JAR Artifact
-        uses: actions/upload-artifact@v4
+      #################################################
+      # CODE COVERAGE
+      #################################################
 
-        with:
-          name: ledger-jar
-          path: target/*.jar
-
-      - name: Upload JaCoCo Report
+      - name: Upload JaCoCo Coverage
         uses: actions/upload-artifact@v4
 
         with:
           name: jacoco-report
           path: target/site/jacoco/
-          if-no-files-found: warn
+
+      #################################################
+      # SCA (OWASP)
+      #################################################
+
+      - name: OWASP Dependency Check
+        run: |
+          mvn org.owasp:dependency-check-maven:check
+
+      - name: Upload OWASP Report
+        uses: actions/upload-artifact@v4
+
+        with:
+          name: dependency-check-report
+          path: target/dependency-check-report.html
+
+      #################################################
+      # SAST (SONARCLOUD)
+      #################################################
 
       - name: SonarCloud Scan
 
@@ -66,63 +85,38 @@ jobs:
 
         run: |
           mvn sonar:sonar \
-            -Dsonar.projectKey=Jagadeesh-Tadepalli-M_MyProject-Ledger-service \
-            -Dsonar.organization=jagadeesh-tadepalli-m \
-            -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.token=${{ secrets.SONAR_TOKEN }}
-      
-      - name: Verify Sonar Report
+          -Dsonar.projectKey=Jagadeesh-Tadepalli-M_MyProject-Ledger-service \
+          -Dsonar.organization=jagadeesh-tadepalli-m \
+          -Dsonar.host.url=https://sonarcloud.io \
+          -Dsonar.token=${SONAR_TOKEN}
 
-        run: |
-          echo "Checking Sonar report..."
-          find . -name "report-task.txt"
+      #################################################
+      # QUALITY GATE
+      #################################################
 
-#      - name: SonarCloud Quality Gate
-#       uses: sonarsource/sonarqube-quality-gate-action@master
-#
-#       timeout-minutes: 5
-#        
-#       with:
-#         scanMetadataReportFile: target/sonar/report-task.txt
-#
-#       env:
-#          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      # Enable after SonarCloud project is fully configured
 
-      - name: Verify NVD Secret
-        run: |
-          if [ -z "${{ secrets.NVD_API_KEY }}" ]; then
-            echo "NVD_API_KEY is missing"
-            exit 1
-          else
-            echo "NVD_API_KEY is configured"
-          fi
+      # - name: SonarCloud Quality Gate
+      #   uses: sonarsource/sonarqube-quality-gate-action@v1.1.0
+      #
+      #   timeout-minutes: 5
+      #
+      #   with:
+      #     scanMetadataReportFile: target/sonar/report-task.txt
+      #
+      #   env:
+      #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      - name: OWASP Dependency Check
-        uses: dependency-check/Dependency-Check_Action@main
+      #################################################
+      # STORE JAR
+      #################################################
 
-        with:
-          project: ledger-service
-          path: .
-          format: HTML
-          args: >
-            --nvdApiKey ${{ secrets.NVD_API_KEY }}
-
-
-      - name: Upload OWASP Report
+      - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
 
         with:
-          name: dependency-check-report
-          path: reports/
-
-      - name: Trivy Filesystem Scan
-        uses: aquasecurity/trivy-action@master
-
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: table
-          severity: CRITICAL,HIGH
+          name: ledger-jar
+          path: target/*.jar
 
   docker-build-scan-push:
 
@@ -132,7 +126,7 @@ jobs:
 
     steps:
 
-      - name: Checkout Source Code
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Configure AWS Credentials
@@ -153,24 +147,29 @@ jobs:
           name: ledger-jar
           path: target/
 
+      #################################################
+      # BUILD IMAGE
+      #################################################
+
       - name: Build Docker Image
         run: |
           docker build -t $IMAGE_NAME:latest .
 
-      - name: Clair Container Scan
-        continue-on-error: true
-        uses: quay/clair-action@v0.3.0
+      #################################################
+      # CONTAINER SCAN
+      #################################################
 
-        with:
-          image-ref: ledger-service:latest
-
-      - name: Trivy Docker Image Scan
+      - name: Trivy Image Scan
         uses: aquasecurity/trivy-action@master
 
         with:
           image-ref: ledger-service:latest
           format: table
           severity: CRITICAL,HIGH
+
+      #################################################
+      # PUSH TO ECR
+      #################################################
 
       - name: Tag Docker Image
         run: |
@@ -196,12 +195,20 @@ jobs:
 
     steps:
 
-      - name: Checkout Source Code
+      - name: Checkout Code
         uses: actions/checkout@v4
+
+      #################################################
+      # BUILD IMAGE
+      #################################################
 
       - name: Build Docker Image
         run: |
           docker build -t ledger-service:latest .
+
+      #################################################
+      # START APPLICATION
+      #################################################
 
       - name: Start Ledger Service
         run: |
@@ -210,8 +217,12 @@ jobs:
             -p 8081:8081 \
             ledger-service:latest
 
-      - name: Wait for Application Startup
-        run: sleep 40
+      - name: Wait For Startup
+        run: sleep 45
+
+      #################################################
+      # DAST
+      #################################################
 
       - name: OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.12.0
@@ -225,4 +236,3 @@ jobs:
         with:
           name: zap-report
           path: report_html.html
-
