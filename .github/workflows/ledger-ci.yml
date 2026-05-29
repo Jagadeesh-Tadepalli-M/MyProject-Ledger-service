@@ -30,6 +30,8 @@ jobs:
 
       - name: Checkout Source Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -55,6 +57,7 @@ jobs:
         with:
           name: jacoco-report
           path: target/site/jacoco/
+          if-no-files-found: warn
 
       - name: SonarCloud Scan
 
@@ -67,11 +70,21 @@ jobs:
             -Dsonar.organization=jagadeesh-tadepalli-m \
             -Dsonar.host.url=https://sonarcloud.io \
             -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+      
+      - name: Verify Sonar Report
+
+        run: |
+          echo "Checking Sonar report..."
+          find . -name "report-task.txt"
+
 
       - name: SonarCloud Quality Gate
         uses: sonarsource/sonarqube-quality-gate-action@master
 
         timeout-minutes: 5
+         
+        with:
+          scanMetadataReportFile: target/sonar/report-task.txt
 
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
